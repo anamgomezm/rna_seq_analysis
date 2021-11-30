@@ -1,0 +1,959 @@
+---
+title: |
+  | \vspace{-1.1cm} \Huge{\textcolor{bondiblue}{PEC 2: Opción 1 - Análisis de datos de RNA-Seq }}
+  | \vspace{0.2cm} \huge{\textit{Análisis de Datos Ómicos}} \vspace{0.2cm}
+  | \vspace{0.1cm} \large{Máster de Bioinformática y Bioestadística UOC y UB} \vspace{0.1cm}
+  | \vspace{0.2cm} \large{Ana M Gómez Martínez} \vspace{0.2cm}
+  | \vspace{0.1cm} `r format(Sys.Date(),"%e de %B, %Y")`  \vspace{0.1cm}
+header-includes:
+- \definecolor{bazaar}{rgb}{0.6, 0.47, 0.48}
+- \definecolor{burgundy}{rgb}{0.0, 0.58, 0.71}
+- \usepackage{tocloft}
+- \setlength\cftparskip{-1pt}
+- \setlength\cftbeforesecskip{10pt}
+- \setlength\cftaftertoctitleskip{2pt}
+- \usepackage{etoolbox}
+- \makeatletter
+- \preto{\@verbatim}{\topsep=0pt \partopsep=0pt}
+- \usepackage{hyperref}
+- \definecolor{cyan}{rgb}{0.0, 0.72, 0.92}
+- \definecolor{bondiblue}{rgb}{0.0, 0.58, 0.71}
+- \definecolor{tyrianpurple}{rgb}{0.4, 0.01, 0.24}
+- \definecolor{amethyst}{rgb}{0.6, 0.4, 0.8}
+- \usepackage{hyperref}
+- \definecolor{aquamarine}{rgb}{0.5, 1.0, 0.83}
+- \definecolor{armygreen}{rgb}{0.29, 0.33, 0.13}
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+fontsize: 11pt
+---
+
+\tableofcontents
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE)
+```
+
+```{r, include=FALSE}
+targets <- read.csv("targets.csv", sep=",", row.names = 1)
+counts <- read.csv("counts.csv", sep=";", row.names = 1)
+```
+
+
+# \textcolor{bondiblue}{Abstract}
+
+En este informe se plantean las cuestiones que deseamos responder (\textcolor{amethyst}{\hyperref[objetivos]{Objetivos}}) a través de nuestro estudio de RNA-seq. Se realizan los análisis de expresión diferencial necesarios (\textcolor{amethyst}{\hyperref[materiales]{Pipeline del análisis}}, \textcolor{amethyst}{\hyperref[resultados]{qué se ha hecho en cada paso y Resultados}}) y finalmente se expone una discusión (\textcolor{amethyst}{\hyperref[discusion]{Discusión}}).
+
+Por tanto, vamos a investigar los datos de expresión RNA-seq de un análisis del **tiroides** obtenido del repositorio GTEx, comparando tres tipos de infiltración: `Not infiltrated tissues` (**NIT**), `Small focal infiltrates` (**SFI**) y `Extensive lymphoid infiltrates` (**ELI**).
+
+# \textcolor{bondiblue}{Objetivos} \label{objetivos}
+
+Nuestro objetivo en esta PEC2 es buscar **expresión diferencial** en muestras de tiroides con 3 tipos distintos de infiltración mediante un análisis de datos de RNA-seq. Para ello, compararemos los grupos **NIT vs SFI**, **NIT vs ELI** y **SFI vs ELI**, tomando 10 muestras de cada grupo (30 en total). 
+
+Las preguntas serían: 
+
+* ¿Hay diferencia de expresión de genes en tejidos de tiroides sin infiltraciones vs tejidos de tiroides con infiltraciones focales? $\rightarrow$ **NIT vs SFI**
+
+* ¿Hay diferencia de expresión de genes en tejidos de tiroides sin infiltraciones vs tejidos de tiroides con infiltraciones extensas? $\rightarrow$ **NIT vs ELI**
+
+* ¿Hay diferencia de expresión de genes en tejidos de tiroides con infiltraciones focales vs tejidos de tiroides con infiltraciones extensas? $\rightarrow$ **SFI vs ELI**
+
+# \textcolor{bondiblue}{Materiales y métodos} \label{materiales}
+
+**Nota:** El código completo se muestra en el \textcolor{amethyst}{\hyperref[apendice]{Apéndice}}, ya que ahora, para facilitar la lectura, mostraremos solo la parte del código más relevante.
+
+## \textcolor{bondiblue}{Naturaleza de los datos, tipo de experimento y diseño experimental} \label{diseno}
+
+Los **datos** de las muestras se han obtenido del repositorio GTEx, teniendo un total de 54 tipos de tejidos, aunque nosotros nos hemos centrado solo en los datos de expresión de **RNA-seq** (que es nuestro **tipo de experimento**) del tiroides, donde se comparan un total de 292 muestras pertenecientes a 3 grupos, aunque nosotros trabajaremos solo con 10 muestras tomadas aleatoriamente de cada grupo:
+
+Not infiltrated tissues (NIT) $\rightarrow$ 236 muestras
+
+Small focal infiltrates (SFI) $\rightarrow$ 42 muestras
+
+Extensive lymphoid infiltrates (ELI) $\rightarrow$ 14 muestras
+
+Así pues, se nos han dado **2 ficheros**, que será con los que trabajaremos: `targets.csv` y `counts.csv`. El primero (`targets.csv`) es una tabla que contiene la información por filas (`r names(targets)`) de cada muestra, y por tanto, hay un total de 292 filas . El segundo (`counts.csv`), es una matriz con 292 columnas, cada una de las cuales representa a una muestra, el nombre de las filas son los nombres en ENSEMBL del transcrito y los valores de las celdas son los *counts*. Los nombres de las columnas de `counts.csv` se corresponden con la columna `Sample_Name` de `targets.csv`.
+
+Con respecto a la fórmula para nuestro **diseño experimental**, especificaremos `~ Group`, ya que *queremos comprobar el efecto que tienen los 3 grupos*. Aunque podríamos haber hecho distintos diseños, como por ejemplo, podríamos haber diseñado el efecto del sexo sobre los 3 grupos de infiltración (~ Group + sex). Pero nosotros, por motivos de extensión, haremos solo el simple con `~ Group`.
+
+## \textcolor{bondiblue}{Herramientas y métodos: Software y pipeline}
+
+Este análisis de ha llevado a cabo con la siguiente versión de `R`: *R version 4.0.3 (2020-10-10)* en un ordenador con el siguiente SO: *Platform: x86_64-pc-linux-gnu (64-bit)*.
+
+Con respecto al **pipeline** del análisis, se ha seguido el indicado en el enunciado de la PEC:
+
+> 1. Definición de los datos tal como se desribe a continuación: 
+
+*Escribir un script que extraiga 10 muestras aleatorias del grupo 1 (NIT), 10 del grupo 2 (SFI) y 10 del grupo 3 (ELI). Con la información de las filas escogidas hay que “subsetear” las columnas escogidas en el archivo `counts.csv`.*
+
+> 2. Preprocesado de los datos: filtraje y normalización
+> 3. Identificación de genes diferencialmente expresados
+> 4. Anotación de los resultados
+> 5. Búsqueda de patrones de expresión y agrupación de las muestras (comparación entre las distintas comparaciones).
+> 6. Análisis de significación biológica (“Gene Enrichment Analysis”)
+
+Entraremos más o menos en detalle de qué se ha hecho en cada paso conforme vayamos mostrando los resultados obtenidos (\textcolor{amethyst}{\hyperref[resultados]{Resultados}}), ya que considero que así es más claro de explicar.  
+
+# \textcolor{bondiblue}{Resultados} \label{resultados}
+
+## \textcolor{bondiblue}{1. Definición de los datos tal como se desribe a continuación}
+
+**_Escribir un script que extraiga 10 muestras aleatorias del grupo 1 (NIT), 10 del grupo 2 (SFI) y 10 del grupo 3 (ELI). Con la información de las filas escogidas hay que “subsetear” las columnas escogidas en el archivo `counts.csv`._**
+
+Para seleccionar 30 muestras aleatoriamente, 10 de cada grupo, primero leeremos los datos de las tablas de `targets` y `counts` en R.
+
+```{r, include=FALSE}
+#targets <- read.csv("targets.csv", sep=",", row.names = 1)
+#counts <- read.csv("counts.csv", sep=";", row.names = 1)
+```
+
+A continuación, crearemos 3 nuevas variables correspondientes a los grupos `NIT`, `SFI` y `ELI`, separando por la columna *Group* del dataset `targets`: 
+
+```{r, include=FALSE}
+targets.groups <- split(targets, targets$Group)
+NIT <- targets.groups$NIT
+SFI <- targets.groups$SFI
+ELI <- targets.groups$ELI
+```
+
+El siguiente paso, es seleccionar de forma aleatoria 10 muestras para cada dataframe (`NIT`, `SFI` y `ELI`). Para ello, utilizaremos la semilla `12345` y la función `sample`, almacenando las 10 muestras aleatorias en 3 dataframes: `nit`, `sfi` y `eli`. Así, crearemos el dataframe `targets.total.selected` uniendo los 3 dataframes anteriores por sus filas.
+
+```{r,include=FALSE}
+set.seed(12345)
+nit <- NIT[sample(nrow(NIT), 10), ]
+sfi <- SFI[sample(nrow(SFI), 10), ]
+eli <- ELI[sample(nrow(ELI), 10), ]
+targets.total.selected <- rbind(nit,sfi,eli)
+rownames(targets.total.selected) <- targets.total.selected$Sample_Name
+```
+
+Después, tomaremos la columna *Sample_Name*, ya que sus filas corresponden con el nombre de las columnas de `counts`, y renombraremos las filas del dataframe `targets.total.selected`. Además, debemos cambiar los puntos (*GTEX.111FC.1026.SM.5GZX1*) que aparecen en el nombre de las columnas de `counts` por guiones (*GTEX-111FC-1026-SM-5GZX1*), como aparece en los dataframes de `targets`.
+
+```{r, include=FALSE}
+names(counts) <- gsub(x = names(counts), pattern = "\\.", replacement = "-")  
+```
+
+Ahora sí, podemos tomar las columnas correspondientes del dataframe `counts`. Lo haremos creando 3 dataframes, `nit.counts`, `sfi.counts` y `eli.counts`. Luego, unimos los 3 dataframes por las columnas en un dataframe llamado `counts.total.selected.` Mostramos las 3 primeras filas y 4 primeras columnas de  `counts.total.selected`:
+
+```{r,include=FALSE}
+library(dplyr)
+library(tibble)
+nit.counts <- counts %>% select(matches(paste(nit$Sample_Name)))
+sfi.counts <- counts %>% select(matches(paste(sfi$Sample_Name)))
+eli.counts <- counts %>% select(matches(paste(eli$Sample_Name)))
+
+counts.total.selected <- cbind(nit.counts,sfi.counts,eli.counts)
+```
+
+```{r,echo=FALSE}
+head(counts.total.selected[,1:4],3)
+```
+
+Cada fila de la matriz de counts `counts.total.selected` representa un transcrito de ENSEMBL, cada columna una muestra específica de ARN y los valores de las celdillas son el número de fragmentos que fueron únicamente asignados al gen correspondiente en la librería. 
+
+El siguiente paso es **crear el objeto** `DESeqDataSet` de la matriz de counts y con la información correspondiente de `targets`. Pero antes, asegurémonos de que el número de columnas de `counts.total.selected` coincide con el número de filas de `targets.total.selected`:
+
+```{r}
+ncol(counts.total.selected) == nrow(targets.total.selected)
+```
+
+También, no debemos olvidar pasar a **factor** la variable `Group` del dataframe `targets.total.selected`, asignando *NIT*, *SFI* y *ELI* a los niveles *1*, *2* y *3*, respectivamente. 
+
+```{r, include=FALSE}
+library("magrittr")
+targets.total.selected$Group <- factor(targets.total.selected$Group,levels=c("NIT","SFI","ELI"),labels=c("NIT","SFI","ELI"))
+```
+
+Como ya indicamos anteriormente en la subsección \textcolor{amethyst}{\hyperref[diseno]{diseño experimental}}, vamos a definir la fórmula de `DESeqDataSetFromMatrix` como `design = ~ Group`.
+
+```{r, include=FALSE}
+library(DESeq2)
+ddsMat <- DESeqDataSetFromMatrix(countData = counts.total.selected,
+                                 colData = targets.total.selected,
+                                 design = ~ Group)
+```
+
+```{r}
+class(ddsMat)
+dds <- ddsMat
+dds
+```
+
+Un aspecto importante, es que no tenemos los datos necesarios para crear un `SummarizedExperiment`, ya que por ejemplo, no tenemos las *matrices BAM*. Pero hemos podido crear un `DESeqDataSet` a partir de los *counts* y *targets*. La diferencia está, en que no podremos visualizar el *Plot de fold changes en el espacio genómico*.
+
+##  \textcolor{bondiblue}{2. Preprocesado de los datos: filtraje y normalización}
+
+### \textcolor{bondiblue}{Prefiltering}
+
+Primero, vamos a eliminar aquellas filas de nuestro dataset que no tengan counts y que por tanto, no aporten información.
+
+```{r include=FALSE}
+f1 <- nrow(dds)
+dds <- dds[rowSums(counts(dds)) > 1, ]
+```
+
+Por lo que pasamos de tener `r f1` filas a tener `r nrow(dds)` filas.
+
+### \textcolor{bondiblue}{Transformación estabilizadora de la varianza y el rlog}
+
+Esta transformación es importante porque muchos métodos estadísticos comunes para el análisis exploratorio de datos multidimensionales (como clustering o PCA), funcionan mejor para datos que tienen el mismo rango de varianza en diferentes rangos de los valores medios.
+
+Como nuestro dataset es de `n=30` porque estamos trabajando con 30 muestras, podríamos utilizar en realidad tanto `vst`  como `rlog`. Nos quedaremos con el primero porque es más rápido. Tando `vst` como `rlog` devuelven un objeto `DESeqTransform` que se basa en la clase `SummarizedExperiment.` Por otro lado, en la función `vst()`, especificamos `blind = FALSE` para que las diferencias entre los 3 grupos de infiltración no contribuyan a la tendencia media de la varianza esperada del experimento.
+
+```{r}
+vsd <- vst(dds, blind = FALSE)
+vsd
+```
+
+```{r include=FALSE}
+head(assay(vsd)[,1:4], 3)
+colData(vsd)
+```
+
+```{r, include=FALSE}
+rld <- rlog(dds, blind = FALSE)
+# head(assay(rld), 3)
+```
+
+A continuación, mostramos un plot con 3 figuras, de izquierda a derecha: transformación log normal, transformación rlog y transformacuón vst. Las muestras que se representan son la primera (perteneciente al grupo *NIT*) vs la número 11 (perteneciente al grupo *SFI*).
+
+```{r, echo=FALSE, warning=FALSE}
+library("dplyr")
+library("ggplot2")
+
+dds <- estimateSizeFactors(dds)
+
+df <- bind_rows(
+  as_data_frame(log2(counts(dds, normalized=TRUE)[, c(1,11)]+1)) %>%
+         mutate(transformation = "log2(x + 1)"),
+  as_data_frame(assay(vsd)[, c(1,11)]) %>% mutate(transformation = "vst"),
+  as_data_frame(assay(rld)[, c(1,11)]) %>% mutate(transformation = "rlog"))
+
+colnames(df)[1:2] <- c("x", "y")  
+
+ggplot(df, aes(x = x, y = y)) + geom_hex(bins = 80) +
+  coord_fixed() + facet_grid( . ~ transformation)  
+```
+
+Podemos ver cómo los genes con recuentos bajos (esquina inferior izquierda) parecen ser excesivamente variables en la escala *logarítmica*, mientras que en *rlog* y *vst*, los genes que tienen entre 5 y 13 counts se ven con más dispersión. Esto puede ser un indicio sobre la expresión diferencial que hay entre estas dos muestras de grupos distintos.
+
+### \textcolor{bondiblue}{Eliminación de efectos Batch ocultos}
+
+Utilizaremos la función `SVA` de `DESeq2`:
+```{r, include=FALSE}
+library("sva")
+
+dat  <- counts(dds, normalized = TRUE)
+idx  <- rowMeans(dat) > 1
+dat  <- dat[idx, ]
+mod  <- model.matrix(~ Group, colData(dds))
+mod0 <- model.matrix(~   1, colData(dds))
+svseq <- svaseq(dat, mod, mod0, n.sv = 2)
+svseq$sv
+```
+
+```{r, echo=FALSE, fig.height=3, fig.width=5, fig.align="center"}
+#par(mfrow = c(2, 1), mar = c(3,5,3,1))
+for (i in 1:2) {
+  stripchart(svseq$sv[, i] ~ dds$Group, vertical = TRUE, main = paste0("SV", i))
+  abline(h = 0)
+ }
+```
+
+Estos gráficos muestran los resultados de la función SVA, el primero se corresponde con la primera variable surrogada, y el segundo gráfico, con la segunda. En realidad, no tendremos en cuenta estos efectos Batch para el resto del análisis, solo los hemoos realizado para mostrar que también se pueden analizar y remover estos efectos.
+
+```{r, include=FALSE}
+ddssva <- dds
+ddssva$SV1 <- svseq$sv[,1]
+ddssva$SV2 <- svseq$sv[,2]
+design(ddssva) <- ~ SV1 + SV2 + Group
+```
+
+## \textcolor{bondiblue}{3. Identificación de genes diferencialmente expresados} \label{deg}
+
+### \textcolor{bondiblue}{Previsualización de plots}
+
+#### \textcolor{bondiblue}{Distancia entre las muestras} \label{heatmap}
+
+Evaluar la similitud general entre las muestras es un primer paso útil en los análisis de RNA-seq. Por lo tanto, vamos a visualizar la distancia entre las muestras en el siguiente heatmap, utilizando la función `pheatmap`:
+
+```{r, echo=FALSE}
+sampleDists <- dist(t(assay(vsd)))
+
+library("pheatmap")
+library("RColorBrewer")
+
+sampleDistMatrix <- as.matrix( sampleDists )
+rownames(sampleDistMatrix) <- paste(vsd$Group)
+colnames(sampleDistMatrix) <- NULL
+colors <- colorRampPalette(rev(brewer.pal(9, "Blues")) )(255)
+pheatmap(sampleDistMatrix,
+         clustering_distance_rows = sampleDists,
+         clustering_distance_cols = sampleDists,
+         col = colors)
+
+```
+
+En el plot podemos ver que mientras que `NIT` y `SFI` aparecen más o menos intercaladas, `ELI` parece estar un poco más alejada. Entonces se intuye que hay como 2 clústeres principales: uno con las muestras de `NIT` y `SFI`, y otro con las de `ELI`. 
+
+#### \textcolor{bondiblue}{PCA plot} \label{pca}
+
+Vamos a utilizar los datos obtenidos con `vst`.
+
+```{r echo=FALSE, fig.height=3, fig.width=5, fig.align='center'}
+plotPCA(vsd, intgroup = c("Group"))
+```
+
+Mediante este gráfico del análisis de componentes principales, se sugiere lo mismo que hemos visto con el *heatmap*: hay menor diferencia entre las muestras de los grupos de `NIT` y `SFI`, que con el grupo `ELI`.
+
+#### \textcolor{bondiblue}{MDS plot} \label{MDS}
+
+Este plot es útil cuando no tenemos una matriz de datos, pero sí una matriz de distancias. Vamos a hacer el plot con los datos obtenidos con `vst`:
+
+```{r, echo=FALSE, fig.height=3, fig.width=5, fig.align='center'}
+mds <- as.data.frame(colData(vsd))  %>%
+         cbind(cmdscale(sampleDistMatrix))
+ggplot(mds, aes(x = `1`, y = `2`, color =Group, shape = Group)) +
+  geom_point(size = 3) + coord_fixed()
+```
+
+Así pues, vemos lo mismo que mostraban los dos plots anteriores: mayor similitud entre `NIT` y `SFI`, que con el grupo `ELI`.
+
+### \textcolor{bondiblue}{Análisis de expresión diferencial} \label{analisis expresion diferencial}
+
+Para ejecutar este análisis, utilizamos la función `DESeq` sobre el objeto *DESeqDataSet* `dds`.
+
+```{r, message=FALSE, include=FALSE}
+dds <- DESeq(dds, parallel =TRUE)
+```
+
+Como queremos comparar los grupos **NIT vs SFI**, **NIT vs ELI** y **SFI vs ELI**, vamos a crear 3 variables: `res1`, `res2` y `res3` (`res1` para el grupo 1 **NIT vs SFI**, `res2` para el grupo 2 **NIT vs ELI** y `res3` para el 3 **SFI vs ELI**), con los resultados de los contrastes de estas comparaciones.
+
+```{r, include=FALSE}
+res1 <- results(dds, contrast=c("Group", "NIT","SFI"))
+res2 <- results(dds, contrast=c("Group", "NIT","ELI"))
+res3 <- results(dds, contrast=c("Group", "SFI", "ELI"))
+```
+
+Veamos los metadata para `res1`, `res2` y `res3`, así como el resumen de los mismos:
+
+- Para `res1`:
+```{r}
+mcols(res1, use.names = TRUE)
+summary(res1)
+```
+
+- Para `res2`:
+```{r}
+mcols(res2, use.names = TRUE)
+summary(res2)
+```
+
+- Para `res3`:
+```{r}
+mcols(res3, use.names = TRUE)
+summary(res3)
+```
+
+Si aceptamos una fracción del 10% de falsos positivos, podemos considerar significativos todos los genes con un adj p-valor por debajo del 10% (es decir, 0.1).  Por lo tanto, para `res1` habrá `r sum(res1$padj < 0.1, na.rm=TRUE)` genes significativos, para `res2`, `r sum(res2$padj < 0.1, na.rm=TRUE)` y para `res3`, `r sum(res3$padj < 0.1, na.rm=TRUE)`.
+
+Por otro lado, también podemos ordenar los genes según el *log2 fold change* y ver cuáles son los que están más fuertemente regulados *aguas abajo*: 
+
+```{r, echo=FALSE}
+res1Sig <- subset(res1, padj < 0.1)
+head(res1Sig[ order(res1Sig$log2FoldChange),c(1:2,6)])
+
+res2Sig <- subset(res2, padj < 0.1)
+head(res2Sig[ order(res2Sig$log2FoldChange),c(1:2,6)])
+
+res3Sig <- subset(res3, padj < 0.1)
+head(res3Sig[ order(res3Sig$log2FoldChange),c(1:2,6)])
+```
+
+Por ejemplo, vemos que el gen `ENSG00000170054.10` coincide para los grupos `NIT vs ELI` y `SFI vs ELI`.
+
+Y los mayores *aguas arriba*:
+```{r, echo=FALSE}
+head(res1Sig[ order(res1Sig$log2FoldChange, decreasing = TRUE),c(1:2,6)])
+head(res2Sig[ order(res2Sig$log2FoldChange, decreasing = TRUE),c(1:2,6)])
+head(res3Sig[ order(res3Sig$log2FoldChange, decreasing = TRUE),c(1:2,6)])
+```
+
+#### \textcolor{bondiblue}{Counts plot} \label{counts}
+
+La función `plotCounts` es una forma rápida de visualizar los recuentos de un gen en particular. \label{1}
+
+```{r echo=FALSE, fig.height=2.8, fig.width=5, fig.align='center'}
+topGene <- rownames(res1)[which.min(res1$padj)]
+
+library("ggbeeswarm")
+
+geneCounts <- plotCounts(dds, gene = topGene, intgroup = c("Group"),
+                         returnData = TRUE)
+ggplot(geneCounts, aes(x = Group, y = count, color = Group, group = Group)) + ggtitle(topGene, "MIN adj p-valor en res1") + 
+  theme(plot.title = element_text(hjust = 0.5)) +
+  scale_y_log10() + geom_point(size = 3) + geom_line()
+```
+
+En este caso, estamos visualizando los counts del gen `r topGene` para los 3 grupos. Este gen es el que tiene el adj p-valor menor dentro de la comparación `res1` (*NIT vs SFI*). De hecho, vemos que hay una gran diferencia en un orden de casi 8.000 entre los counts de ese gen para los grupos `NIT` y `SFI`. 
+
+```{r echo=FALSE, fig.height=2.8, fig.width=5, fig.align='center'}
+topGene <- rownames(res2)[which.min(res2$padj)]
+
+library("ggbeeswarm")
+
+geneCounts <- plotCounts(dds, gene = topGene, intgroup = c("Group"),
+                         returnData = TRUE)
+ggplot(geneCounts, aes(x = Group, y = count, color = Group, group = Group)) + ggtitle(topGene, "MIN adj p-valor en res2") + 
+  theme(plot.title = element_text(hjust = 0.5)) +
+  scale_y_log10() + geom_point(size = 3) + geom_line()
+```
+
+Ahora vemos los counts del gen `r topGene` para los 3 grupos. Este gen es el que tiene el adj p-valor menor dentro de la comparación `res2` (*NIT vs ELI*). Y en efecto, vemos que hay bastante diferencia en un orden de casi 1.000 entre los counts de ese gen para los grupos `NIT` y `ELI`. 
+
+```{r echo=FALSE, fig.height=2.8, fig.width=5, fig.align='center'}
+topGene <- rownames(res3)[which.max(res3$padj)]
+
+library("ggbeeswarm")
+
+geneCounts <- plotCounts(dds, gene = topGene, intgroup = c("Group"),
+                         returnData = TRUE)
+ggplot(geneCounts, aes(x = Group, y = count, color = Group, group = Group)) + ggtitle(topGene, "MAX adj p-valor en res3") + 
+  theme(plot.title = element_text(hjust = 0.5)) +
+  scale_y_log10() + geom_point(size = 3) + geom_line()
+```
+
+En este gráfico se representan los counts del gen `r topGene` para los 3 grupos. Este gen es el que tiene el adj p-valor *mayor* dentro de la comparación `res3` (*SFI vs ELI*). Así pues, vemos que no hay mucha diferencia en un orden de aproximadamente 5 entre los counts de ese gen para los grupos `SFI` y `ELI`. 
+
+#### \textcolor{bondiblue}{MA-Plot} \label{MA}
+
+```{r, echo=FALSE, fig.height=3.8, fig.width=5, fig.align='center'}
+library("apeglm")
+#resultsNames(dds)
+res.1 <- lfcShrink(dds, coef="Group_SFI_vs_NIT", type="apeglm")
+
+plotMA(res.1, ylim = c(-5,5))
+topGene <- rownames(res.1)[which.min(res.1$padj)]
+
+with(res.1[topGene, ], {
+  points(baseMean, log2FoldChange, col="dodgerblue", cex=2, lwd=2)
+  text(baseMean, log2FoldChange, topGene, pos=2, col="dodgerblue")
+})
+```
+
+Este plot proporciona una descripción general útil para la distribución de los coeficientes estimados en el modelo, como se describe en los ejes del gráfico. Hemos utilizado el método `apeglm` para reducir los coeficientes del grupo *Group_SFI_vs_NIT*. Además, en el gráfico se señala el transcrito con el adj p-valor más pequeño. De hecho, coincide con el \textcolor{amethyst}{\hyperref[diseno]{primer gráfico del counts plot}}, cuyo gen con menor adj p-valor es el mismo que el que nos muestra este MA-plot `r which.min(res.1$padj)`.
+
+## \textcolor{bondiblue}{4. Anotación de los resultados}
+
+Utilizaremos `org.Hs.eg.db` (Genome wide annotation for Human \textcolor{amethyst}{\href{https://bioconductor.org/packages/release/data/annotation/html/org.Hs.eg.db.html}{link}}).
+
+Un detalle importante, es que nuestros transcritos (genes) aparecen con un punto, que corresponde a la versión, por poner un ejemplo: *ENSG00000104921.10*. Entonces, debemos quitar el `.` y lo que haya detrás de él para que funcione el KEY con ENSEMBL (es decir, que el transcrito se quede así: *ENSG00000104921*).
+
+```{r, echo=FALSE}
+library("AnnotationDbi")
+library("org.Hs.eg.db")
+#columns(org.Hs.eg.db)
+tmp1=gsub("\\..*","",row.names(res1))
+res1$symbol <- mapIds(org.Hs.eg.db,
+                     keys=tmp1,
+                     column="SYMBOL",
+                     keytype="ENSEMBL",
+                     multiVals="first")
+res1$entrez <- mapIds(org.Hs.eg.db,
+                     keys=tmp1,
+                     column="ENTREZID",
+                     keytype="ENSEMBL",
+                     multiVals="first")
+res1Ordered <- res1[order(res1$padj),]
+#head(res1Ordered)
+```
+
+Mostremos las 6 primeras filas y 5 columnas para `res1`:
+```{r, echo=FALSE}
+head(res1Ordered[,c(1:2,6:8)],6)
+```
+
+Ahora aparecen las columnas `symbol` y `entrez`.
+
+Para `res2`:
+```{r, echo=FALSE}
+tmp2=gsub("\\..*","",row.names(res2))
+res2$symbol <- mapIds(org.Hs.eg.db,
+                     keys=tmp2,
+                     column="SYMBOL",
+                     keytype="ENSEMBL",
+                     multiVals="first")
+res2$entrez <- mapIds(org.Hs.eg.db,
+                     keys=tmp2,
+                     column="ENTREZID",
+                     keytype="ENSEMBL",
+                     multiVals="first")
+res2Ordered <- res2[order(res2$padj),]
+head(res2Ordered[,c(1:2,6:8)],6)
+```
+
+Para `res3`:
+```{r, echo=FALSE}
+tmp3=gsub("\\..*","",row.names(res3))
+res3$symbol <- mapIds(org.Hs.eg.db,
+                     keys=tmp3,
+                     column="SYMBOL",
+                     keytype="ENSEMBL",
+                     multiVals="first")
+res3$entrez <- mapIds(org.Hs.eg.db,
+                     keys=tmp3,
+                     column="ENTREZID",
+                     keytype="ENSEMBL",
+                     multiVals="first")
+res3Ordered <- res3[order(res3$padj),]
+head(res3Ordered[,c(1:2,6:8)],6)
+```
+
+## \textcolor{bondiblue}{5. Búsqueda de patrones de expresión y agrupación de las muestras (comparación entre las distintas comparaciones)} \label{cluster}
+
+En realidad, con respecto a este apartado, ya hemos comparado en la \textcolor{amethyst}{\hyperref[deg]{sección anterior}} entre distintas comparaciones entre genes diferencialmente expresados, pero lo que aún no hemos hecho es un clúster con los genes con mayor variabilidad. Por tanto, representemos el clúster con la función `pheatmap` con los 15 genes más altamente variables. Volveremos a trabajar con los datos de `vst`.
+
+```{r, echo=FALSE}
+library("genefilter")
+topVarGenes <- head(order(rowVars(assay(vsd)), decreasing = TRUE), 15)
+
+mat  <- assay(vsd)[topVarGenes, ]
+mat  <- mat - rowMeans(mat)
+anno <- as.data.frame(colData(vsd)[, c("Sample_Name","Group")])
+anno$Sample_Name <- NULL
+pheatmap(mat, annotation_col = anno)
+```
+
+Por tanto, a la derecha vemos el nombre de los 15 genes (transcritos) con mayor variabilidad. Arriba, aparecen en verde los pertenecientes al grupo *NIT*, los del grupo *SFI* aparecen en color salmón y los del grupo *ELI*, en azul. Abajo, vemos el nombre de las 30 muestras. La representación de los genes en las muestras aparecen en colores entre naranja y azul. Así, los genes pueden dividirse en dos grupos: el primero abarca los 5 primeros genes, y el segundo grupo, los 10 genes restantes. Con respecto a los 3 grupos de infiltración, vemos que para los 5 primeros genes, los grupos *NIT* y *SFI* coinciden bastante con respecto a la representación de la variabilidad de estos genes (color naranja), mientras que el grupo *ELI*, sigue un patrón diferente (color azul). A partir del gen número 6 y en adelante, esta similitud entre los grupos *NIT* y *SFI* no se ve tan clara, pero para el grupo *ELI* sí que se observa un cambio de patrón (color rojo-naranja-amarillo).
+
+## \textcolor{bondiblue}{6. Análisis de significación biológica (“Gene Enrichment Analysis”)} \label{significacion}
+
+Como ya vimos en la PEC anterior, el análisis de significación biológica estudia las funciones de los genes buscando sus anotaciones en bases de datos de anotación funcional.
+
+El primer paso es preparar la lista de genes que analizaremos. Para ello, tomaremos los 35 primeros genes con el adj p-valor significativo más alto de las comparaciones `res1`, `res2` y `res3`.
+
+```{r, include=FALSE}
+NITvsSFI = head(res1Ordered,35)
+NITvsSFI$padj < 0.05
+NITvsELI  = head(res2Ordered,35)
+NITvsELI$padj < 0.05
+SFIvsELI = head(res3Ordered,35)
+SFIvsELI$padj < 0.05
+
+listOfTables <- list(NITvsSFI = NITvsSFI,
+                     NITvsELI  = NITvsELI,
+                     SFIvsELI = SFIvsELI)
+```
+
+El siguiente paso será crear el universo, para el cual definiremos que contenga todos los genes que tengan al menos una anotación en Gene Ontology. Estamos utilizando los paquetes de anotaciones de organismos de Gene Ontology (`org.Hs.egGO`) y de rutas metabólicas (`org.Hs.egPATH`).
+
+```{r, include=FALSE}
+mapped_genes2GO <- mappedkeys(org.Hs.egGO)
+mapped_genes2KEGG <- mappedkeys(org.Hs.egPATH)
+mapped_genes <- union(mapped_genes2GO , mapped_genes2KEGG)
+universe <- mapped_genes
+```
+
+Ya podemos usar el paquete `ReactomePA` para hacer el análisis de significación biológica sobre las 3 comparaciones **NIT vs SFI**, **NIT vs ELI** y **SFI vs ELI**. 
+
+```{r include=FALSE}
+library(ReactomePA)
+listOfData <- listOfTables
+comparisonsNames <- names(listOfData)
+```
+
+* Primer grupo **NIT vs SFI**. Vamos a mostrar el *head* de todos los resultados obtenidos con `enrichPathway` solo para esta comparación, para las demás, por motivos de extensión, mostraremos solo la *descripción* y el *geneID*.
+```{r, echo=FALSE}
+genesIn <- listOfData[[1]]
+comparison <- comparisonsNames[1]
+enrich.result <- enrichPathway(gene = genesIn$entrez,
+                              pvalueCutoff = 0.05,
+                              readable = T,
+                              pAdjustMethod = "BH",
+                              organism = "human",
+                              universe = universe)
+
+cat("##################################")
+cat("\nComparison: ", comparison, "\n")
+cat("##################################\n")
+print(head(enrich.result))
+
+print(barplot(enrich.result, showCategory = 10, font.size = 7, 
+         title = paste0("Reactome Pathway", comparison)))
+
+print(cnetplot(enrich.result, categorySize = "geneNum", schowCategory = 2,vertex.label.cex = 0.75) + ggtitle("Cnetplot ",comparison))
+```
+
+Para esta primera comparación **NIT vs SFI** hay 3 genes que se repiten, que son: `CALCA`, `VIPR2` y `CYSLTR2`. Estos genes están implicados en las siguientes funciones:
+
+*Receptores de ligandos de tipo glucagón*
+
+*Respuesta antiinflamatoria que favorece la infección por parásitos Leishmania*
+
+*Producción de citocinas antiinflamatorias mediada por ADORA2B*
+
+*Crecimiento y supervivencia del parásito Leishmania*
+
+*Clase B/2 (receptores de la familia de la secretina)*
+
+* Segundo grupo **NIT vs ELI**. Ahora, por motivos de extensión, mostraremos solo el *head* de la *descripción* y el *geneID*:
+```{r, echo=FALSE}
+genesIn <- listOfData[[2]]
+comparison <- comparisonsNames[2]
+enrich.result <- enrichPathway(gene = genesIn$entrez,
+                              pvalueCutoff = 0.05,
+                              readable = T,
+                              pAdjustMethod = "BH",
+                              organism = "human",
+                              universe = universe)
+
+cat("##################################")
+cat("\nComparison: ", comparison, "\n")
+cat("##################################\n")
+print(head(enrich.result@result$Description))
+print(head(enrich.result@result[,c(8)]))
+
+print(barplot(enrich.result, showCategory = 10, font.size = 7, 
+         title = paste0("Reactome Pathway", comparison)))
+
+print(cnetplot(enrich.result, categorySize = "geneNum", schowCategory = 2,vertex.label.cex = 0.75) + ggtitle("Cnetplot ",comparison))
+```
+
+Esta vez se comparan los grupos **NIT vs ELI**, donde los genes que aparecen implicados en el *cnetplot* son `CLEC2D`, `CD22`, `ITGB7` y `BLK`. Estos genes están relacionados con:
+
+*Interacciones inmunorreguladoras entre una célula linfoide y una no linfoide*
+
+*El antígeno que activa el receptor de células B (BCR), generando segundos mensajeros*
+
+* Tercer grupo **SFI vs ELI**:
+```{r, echo=FALSE}
+genesIn <- listOfData[[3]]
+comparison <- comparisonsNames[3]
+enrich.result <- enrichPathway(gene = genesIn$entrez,
+                              pvalueCutoff = 0.05,
+                              readable = T,
+                              pAdjustMethod = "BH",
+                              organism = "human",
+                              universe = universe)
+
+cat("##################################")
+cat("\nComparison: ", comparison, "\n")
+cat("##################################\n")
+print(head(enrich.result@result[,c(2,8)]))
+
+print(barplot(enrich.result, showCategory = 10, font.size = 7, 
+         title = paste0("Reactome Pathway", comparison)))
+
+print(cnetplot(enrich.result, categorySize = "geneNum", schowCategory = 2,vertex.label.cex = 0.75) + ggtitle("Cnetplot ",comparison))
+```
+
+Finalmente, con respecto a la comparación de los grupos **SFI vs ELI**, los genes `PTPN6`, `SELL`, `TBC1D10C`, `HVCN1` y `PLAC8` están implicados en la *desgranulación de neutrófilos*.
+
+# \textcolor{bondiblue}{Discusión} \label{discusion}
+
+Como a lo largo del informe hemos ido comentando los resultados, los resumiremos brevemente y responderemos a nuestras preguntas planteadas en los \textcolor{amethyst}{\hyperref[objetivos]{Objetivos}}.
+
+En general, hemos visto que los grupos de infiltración `NIT` y `SFI` tienden a tener una menor distancia entre las muestras, según se aprecia en el primer \textcolor{amethyst}{\hyperref[heatmap]{heatmap}}. Por tanto, entre esos dos grupos hay menos diferencia entre las muestras, como señalan los plots \textcolor{amethyst}{\hyperref[pca]{PCA}} y el \textcolor{amethyst}{\hyperref[MDS]{MDS}}. El \textcolor{amethyst}{\hyperref[cluster]{clúster}} muestra las ditancias, similitudes y diferencias en la expresión de los 15 genes significativos con mayor variabilidad. Por otro lado, con respecto al \textcolor{amethyst}{\hyperref[analisis expresion diferencial]{análisis de expresión diferencial}} de genes, vimos distintos genes entre los grupos, como en los \textcolor{amethyst}{\hyperref[counts]{counts plots}} o en el \textcolor{amethyst}{\hyperref[MA]{MA-plots}}. Finalmente, aprovecharemos los resultados del \textcolor{amethyst}{\hyperref[significacion]{análisis de significación biológica}}, para el cual utilizamos los **35 genes con mayor adj p-valor significativo expresados diferencialmente entre los grupos de infiltración correspondientes**, para responder a las siguientes cuestiones:
+
+* ¿Hay diferencia de expresión de genes en tejidos de tiroides sin infiltraciones vs tejidos de tiroides con infiltraciones focales? $\rightarrow$ **NIT vs SFI**
+
+Hay expresión diferencial entre en los genes `CALCA`, `VIPR2` y `CYSLTR2` cuando comparamos **NIT vs SFI** (tejidos sin infiltración vs tejidos con infiltración focal). Además, llama la atención que algunos de los genes están relacionados con la respuesta inflamatoria del parásito Leishmania. Otras funciones de los genes serían la producción de citoquinas antiinflamatorias, receptores de ligandos de tipo glucagón y receptores de la familia de la secretina.
+
+* ¿Hay diferencia de expresión de genes en tejidos de tiroides sin infiltraciones vs tejidos de tiroides con infiltraciones extensas? $\rightarrow$ **NIT vs ELI**
+
+Hay expresión diferencial entre en los genes `CLEC2D`, `CD22`, `ITGB7` y `BLK` cuando comparamos **NIT vs ELI** (tejidos sin infiltración vs tejidos con infiltraciones extensas). Estos genes están relacionados con interacciones inmunorreguladoras entre células linfoides y no linfoides y con el antígeno que activa el receptor de células B.
+
+* ¿Hay diferencia de expresión de genes en tejidos de tiroides con infiltraciones focales vs tejidos de tiroides con infiltraciones extensas? $\rightarrow$ **SFI vs ELI**
+
+Hay expresión diferencial entre los genes `PTPN6`, `SELL`, `TBC1D10C`, `HVCN1` y `PLAC8` con comparación **SFI vs ELI** (tejidos con infiltración focal vs tejidos con infiltraciones extensas). Estos genes están implicados en la desgranulación de neutrófilos.
+
+\newpage
+
+# \textcolor{bondiblue}{Apéndice} \label{apendice}
+
+A continuación, se muestra el **código** empleado.
+
+> **1. Definición de los datos tal como se ha descrito en la PEC**
+
+```{r, eval=FALSE}
+targets <- read.csv("targets.csv", sep=",", row.names = 1)
+counts <- read.csv("counts.csv", sep=";", row.names = 1)
+targets.groups <- split(targets, targets$Group)
+NIT <- targets.groups$NIT
+SFI <- targets.groups$SFI
+ELI <- targets.groups$ELI
+set.seed(12345)
+nit <- NIT[sample(nrow(NIT), 10), ]
+sfi <- SFI[sample(nrow(SFI), 10), ]
+eli <- ELI[sample(nrow(ELI), 10), ]
+targets.total.selected <- rbind(nit,sfi,eli)
+rownames(targets.total.selected) <- targets.total.selected$Sample_Name
+names(counts) <- gsub(x = names(counts), pattern = "\\.", replacement = "-")  
+library(dplyr)
+library(tibble)
+nit.counts <- counts %>% select(matches(paste(nit$Sample_Name)))
+sfi.counts <- counts %>% select(matches(paste(sfi$Sample_Name)))
+eli.counts <- counts %>% select(matches(paste(eli$Sample_Name)))
+counts.total.selected <- cbind(nit.counts,sfi.counts,eli.counts)
+ncol(counts.total.selected) == nrow(targets.total.selected)
+library("magrittr")
+targets.total.selected$Group <- factor(targets.total.selected$Group,
+                                       levels=c("NIT","SFI","ELI"),
+                                       labels=c("NIT","SFI","ELI"))
+library(DESeq2)
+ddsMat <- DESeqDataSetFromMatrix(countData = counts.total.selected,
+                                 colData = targets.total.selected,
+                                 design = ~ Group)
+class(ddsMat)
+dds <- ddsMat
+```
+
+> **2. Preprocesado de los datos: filtraje y normalización**
+
+```{r eval=FALSE}
+#######################################################
+#Prefiltering
+#######################################################
+nrow(dds)
+dds <- dds[rowSums(counts(dds)) > 1, ]
+nrow(dds)
+#######################################################
+#Transformación estabilizadora de la varianza y el rlog
+#######################################################
+vsd <- vst(dds, blind = FALSE)
+head(assay(vsd), 3)
+colData(vsd)
+rld <- rlog(dds, blind = FALSE)
+# head(assay(rld), 3)
+library("dplyr")
+library("ggplot2")
+dds <- estimateSizeFactors(dds)
+df <- bind_rows(
+  as_data_frame(log2(counts(dds, normalized=TRUE)[, c(1,11)]+1)) %>%
+         mutate(transformation = "log2(x + 1)"),
+  as_data_frame(assay(vsd)[, c(1,11)]) %>% mutate(transformation = "vst"),
+  as_data_frame(assay(rld)[, c(1,11)]) %>% mutate(transformation = "rlog"))
+colnames(df)[1:2] <- c("x", "y")  
+ggplot(df, aes(x = x, y = y)) + geom_hex(bins = 80) +
+  coord_fixed() + facet_grid( . ~ transformation)  
+#######################################################
+#Eliminación de efectos Batch ocultos
+#######################################################
+dat  <- counts(dds, normalized = TRUE)
+idx  <- rowMeans(dat) > 1
+dat  <- dat[idx, ]
+mod  <- model.matrix(~ Group, colData(dds))
+mod0 <- model.matrix(~   1, colData(dds))
+svseq <- svaseq(dat, mod, mod0, n.sv = 2)
+svseq$sv
+for (i in 1:2) {
+  stripchart(svseq$sv[, i] ~ dds$Group, vertical = TRUE, main = paste0("SV", i))
+  abline(h = 0)
+ }
+```
+
+> **3. Identificación de genes diferencialmente expresados**
+
+**Previsualización de plots**
+
+```{r, eval=FALSE}
+#######################################################
+#Distancia entre las muestras
+#######################################################
+sampleDists <- dist(t(assay(vsd)))
+library("pheatmap")
+library("RColorBrewer")
+sampleDistMatrix <- as.matrix( sampleDists )
+rownames(sampleDistMatrix) <- paste(vsd$Group)
+colnames(sampleDistMatrix) <- NULL
+colors <- colorRampPalette(rev(brewer.pal(9, "Blues")) )(255)
+pheatmap(sampleDistMatrix,
+         clustering_distance_rows = sampleDists,
+         clustering_distance_cols = sampleDists,
+         col = colors)
+#######################################################
+#PCA plot
+#######################################################
+plotPCA(vsd, intgroup = c("Group"))
+#######################################################
+#MDS plot
+#######################################################
+mds <- as.data.frame(colData(vsd))  %>%
+         cbind(cmdscale(sampleDistMatrix))
+ggplot(mds, aes(x = `1`, y = `2`, color =Group, shape = Group)) +
+  geom_point(size = 3) + coord_fixed()
+```
+
+**Análisis de expresión diferencial**
+
+```{r, eval=FALSE}
+dds <- DESeq(dds, parallel =TRUE)
+res1 <- results(dds, contrast=c("Group", "NIT","SFI"))
+res2 <- results(dds, contrast=c("Group", "NIT","ELI"))
+res3 <- results(dds, contrast=c("Group", "SFI", "ELI"))
+mcols(res1, use.names = TRUE)
+summary(res1)
+mcols(res2, use.names = TRUE)
+summary(res2)
+mcols(res3, use.names = TRUE)
+summary(res3)
+sum(res1$padj < 0.1, na.rm=TRUE)
+sum(res2$padj < 0.1, na.rm=TRUE)
+sum(res3$padj < 0.1, na.rm=TRUE)
+#Regulación aguas abajo:
+res1Sig <- subset(res1, padj < 0.1)
+head(res1Sig[ order(res1Sig$log2FoldChange),c(1:2,6)])
+res2Sig <- subset(res2, padj < 0.1)
+head(res2Sig[ order(res2Sig$log2FoldChange),c(1:2,6)])
+res3Sig <- subset(res3, padj < 0.1)
+head(res3Sig[ order(res3Sig$log2FoldChange),c(1:2,6)])
+#Regulación aguas arriba:
+head(res1Sig[ order(res1Sig$log2FoldChange, decreasing = TRUE),c(1:2,6)])
+head(res2Sig[ order(res2Sig$log2FoldChange, decreasing = TRUE),c(1:2,6)])
+head(res3Sig[ order(res3Sig$log2FoldChange, decreasing = TRUE),c(1:2,6)])
+#######################################################
+#Counts plot
+#######################################################
+topGene <- rownames(res1)[which.min(res1$padj)]
+library("ggbeeswarm")
+geneCounts <- plotCounts(dds, gene = topGene, intgroup = c("Group"),
+                         returnData = TRUE)
+ggplot(geneCounts, aes(x = Group, y = count, color = Group, group = Group)) + 
+  ggtitle(topGene, "MIN adj p-valor en res1") + 
+  theme(plot.title = element_text(hjust = 0.5)) +
+  scale_y_log10() + geom_point(size = 3) + geom_line()
+#######################################################
+topGene <- rownames(res2)[which.min(res2$padj)]
+library("ggbeeswarm")
+geneCounts <- plotCounts(dds, gene = topGene, intgroup = c("Group"),
+                         returnData = TRUE)
+ggplot(geneCounts, aes(x = Group, y = count, color = Group, group = Group)) + 
+  ggtitle(topGene, "MIN adj p-valor en res2") + 
+  theme(plot.title = element_text(hjust = 0.5)) +
+  scale_y_log10() + geom_point(size = 3) + geom_line()
+#######################################################
+topGene <- rownames(res3)[which.max(res3$padj)]
+library("ggbeeswarm")
+geneCounts <- plotCounts(dds, gene = topGene, intgroup = c("Group"),
+                         returnData = TRUE)
+ggplot(geneCounts, aes(x = Group, y = count, color = Group, group = Group)) + 
+  ggtitle(topGene, "MAX adj p-valor en res3") + 
+  theme(plot.title = element_text(hjust = 0.5)) +
+  scale_y_log10() + geom_point(size = 3) + geom_line()
+#######################################################
+#MA-plot
+#######################################################
+library("apeglm")
+resultsNames(dds)
+res.1 <- lfcShrink(dds, coef="Group_SFI_vs_NIT", type="apeglm")
+plotMA(res.1, ylim = c(-5,5))
+topGene <- rownames(res.1)[which.min(res.1$padj)]
+with(res.1[topGene, ], {
+  points(baseMean, log2FoldChange, col="dodgerblue", cex=2, lwd=2)
+  text(baseMean, log2FoldChange, topGene, pos=2, col="dodgerblue")
+})
+```
+
+> **4. Anotación de los resultados**
+
+```{r, eval=FALSE}
+library("AnnotationDbi")
+library("org.Hs.eg.db")
+#columns(org.Hs.eg.db)
+#res1:
+tmp1=gsub("\\..*","",row.names(res1))
+res1$symbol <- mapIds(org.Hs.eg.db,
+                     keys=tmp1,
+                     column="SYMBOL",
+                     keytype="ENSEMBL",
+                     multiVals="first")
+res1$entrez <- mapIds(org.Hs.eg.db,
+                     keys=tmp1,
+                     column="ENTREZID",
+                     keytype="ENSEMBL",
+                     multiVals="first")
+res1Ordered <- res1[order(res1$padj),]
+#head(res1Ordered)
+head(res1Ordered[,c(1:2,6:8)],6)
+#res2:
+tmp2=gsub("\\..*","",row.names(res2))
+res2$symbol <- mapIds(org.Hs.eg.db,
+                     keys=tmp2,
+                     column="SYMBOL",
+                     keytype="ENSEMBL",
+                     multiVals="first")
+res2$entrez <- mapIds(org.Hs.eg.db,
+                     keys=tmp2,
+                     column="ENTREZID",
+                     keytype="ENSEMBL",
+                     multiVals="first")
+res2Ordered <- res2[order(res2$padj),]
+head(res2Ordered[,c(1:2,6:8)],6)
+# res3:
+tmp3=gsub("\\..*","",row.names(res3))
+res3$symbol <- mapIds(org.Hs.eg.db,
+                     keys=tmp3,
+                     column="SYMBOL",
+                     keytype="ENSEMBL",
+                     multiVals="first")
+res3$entrez <- mapIds(org.Hs.eg.db,
+                     keys=tmp3,
+                     column="ENTREZID",
+                     keytype="ENSEMBL",
+                     multiVals="first")
+res3Ordered <- res3[order(res3$padj),]
+head(res3Ordered[,c(1:2,6:8)],6)
+```
+
+> **5. Búsqueda de patrones de expresión y agrupación de las muestras (comparación entre las distintas comparaciones).**
+
+```{r, eval=FALSE}
+library("genefilter")
+topVarGenes <- head(order(rowVars(assay(vsd)), decreasing = TRUE), 15)
+mat  <- assay(vsd)[topVarGenes, ]
+mat  <- mat - rowMeans(mat)
+anno <- as.data.frame(colData(vsd)[, c("Sample_Name","Group")])
+anno$Sample_Name <- NULL
+pheatmap(mat, annotation_col = anno)
+```
+
+> **6. Análisis de significación biológica (“Gene Enrichment Analysis”)**
+
+```{r, eval=FALSE}
+NITvsSFI = head(res1Ordered,35)
+NITvsSFI$padj < 0.05
+NITvsELI  = head(res2Ordered,35)
+NITvsELI$padj < 0.05
+SFIvsELI = head(res3Ordered,35)
+SFIvsELI$padj < 0.05
+listOfTables <- list(NITvsSFI = NITvsSFI,
+                     NITvsELI  = NITvsELI,
+                     SFIvsELI = SFIvsELI)
+mapped_genes2GO <- mappedkeys(org.Hs.egGO)
+mapped_genes2KEGG <- mappedkeys(org.Hs.egPATH)
+mapped_genes <- union(mapped_genes2GO , mapped_genes2KEGG)
+library(ReactomePA)
+listOfData <- listOfTables
+comparisonsNames <- names(listOfData)
+universe <- mapped_genes
+for (i in 1:length(listOfData)){
+   genesIn <- listOfData[[i]]
+   comparison <- comparisonsNames[i]
+   enrich.result <- enrichPathway(gene = genesIn$entrez,
+                                  pvalueCutoff = 0.05,
+                                  readable = T,
+                                  pAdjustMethod = "BH",
+                                  organism = "human",
+                                  universe = universe)
+   cat("##################################")
+   cat("\nComparison: ", comparison, "\n")
+   cat("##################################\n")
+   print(head(enrich.result))
+   print(barplot(enrich.result, showCategory = 10, font.size = 7, 
+             title = paste0("Reactome Pathway ", comparison)))
+   print(cnetplot(enrich.result, categorySize = "geneNum", schowCategory = 2,
+                  vertex.label.cex = 0.75))
+}
+```
